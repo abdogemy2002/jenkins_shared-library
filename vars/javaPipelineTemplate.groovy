@@ -1,65 +1,104 @@
-// vars/standardPipeline.groovy
 def call(Map config = [:]) {
     
-    // Define parameters with fallback default values
-    def gitUrl = config.gitUrl ?: 'https://github.com/spring-projects/spring-petclinic-a.git'
+    // --- Configuration Variables ---
+    def gitUrl = config.gitUrl 
     def gitBranch = config.gitBranch ?: 'main'
     def serverPort = config.serverPort ?: '9090'
+    def imageName = config.imageName ?: 'spring-petclinic'
+    def imageTag = config.imageTag ?: 'latest'
 
     pipeline {
         agent {
-           // Explicitly targeting your new worker node
            label 'jenkins-worker' 
         } 
         
         tools {
-            // Your exact configured tool versions
             maven 'MVN-3.9.15'
             jdk 'JDK-17.0.13'
         }
         
         stages {
-            stage ('clone code'){
+            stage ('Clone Code') {
                 steps {
                     echo "Cloning repository: ${gitUrl} (Branch: ${gitBranch})"
-                    git branch: "${gitBranch}",
-                        url: "${gitUrl}"  
+                    git branch: "${gitBranch}", url: "${gitUrl}"  
                 }
             }
             
-            stage ('config'){
-                steps{
-                    echo "Configuring application to run on port: ${serverPort}"
+            stage ('Config') {
+                steps {
+                    echo "Injecting server port: ${serverPort}"
                     sh "echo \"server.port=${serverPort}\" >> src/main/resources/application.properties"
                 }
             }
             
-            stage ('clean compile'){
+            stage ('Clean & Compile') {
                 steps {
                     sh 'mvn clean compile'
                 }
             }
             
-            stage ('test'){
+            stage ('Test') {
                 steps {
                     sh 'mvn test'
                 }
             }
             
-            stage ('package'){
+            stage ('Package') {
                 steps {
-                    sh 'mvn package'
+                    sh 'mvn package -DskipTests'
                 }
             }
             
-            stage ('run'){
+            stage ('Docker Build') {
                 steps {
-                    echo "Starting Spring Boot application on port ${serverPort}..."
-                    sh 'nohup java -jar target/*.jar &'
-                    
-                    // Temporary sleep to keep the pipeline alive while you verify the app
-                    sh 'sleep 300'
+                    withCredentials([
+                        string(credentialsId: 'aws-ecr-uri', variable: 'SECRET_ECR_URI')
+                    ]) {
+                        script {
+                            def versionedImage = "${SECRET_ECR_URI}/${imageName}:${imageTag}"
+                            echo "Building Docker Image: ${versionedImage}"
+                            
+                            // Always build to validate the Dockerfile compiles successfully
+                            sh "docker build -t ${versionedImage} ."
+                        }
+                    }
                 }
+            }
+            
+            stage ('Docker Push to ECR') {
+                when {
+                    branch 'main'
+                }
+                steps {
+                    withCredentials([
+                        string(credentialsId: 'aws-ecr-uri', variable: 'SECRET_ECR_URI'),
+                        string(credentialsId: 'aws-ecr-region', variable: 'SECRET_AWS_REGION')
+                    ]) {
+                        script {
+                            def versionedImage = "${SECRET_ECR_URI}/${imageName}:${imageTag}"
+                            def latestImage = "${SECRET_ECR_URI}/${imageName}:latest"
+                            
+                            echo "Main branch detected. Pushing to AWS ECR..."
+                            
+                            // 1. Authenticate with AWS ECR
+                            sh "aws ecr get-login-password --region ${SECRET_AWS_REGION} | docker login --username AWS --password-stdin ${SECRET_ECR_URI}"
+                            
+                            // 2. Apply the 'latest' floating tag locally
+                            sh "docker tag ${versionedImage} ${latestImage}"
+                            
+                            // 3. Push both the immutable version tag and the latest tag
+                            sh "docker push ${versionedImage}"
+                            sh "docker push ${latestImage}"
+                        }
+                    }
+                }
+            }
+        }
+        
+        post {
+            always {
+                cleanWs()
             }
         }
     }
