@@ -34,19 +34,31 @@ def call(Map config = [:]) {
             
             stage ('Clean & Compile') {
                 steps {
-                    sh 'mvn clean compile'
+                    // Optimized with local Maven dependency caching
+                    sh 'mvn -Dmaven.repo.local=/var/jenkins/.m2/repository clean compile'
                 }
             }
             
             stage ('Test') {
                 steps {
-                    sh 'mvn test'
+                    // Optimized with local Maven dependency caching
+                    sh 'mvn -Dmaven.repo.local=/var/jenkins/.m2/repository test'
+                }
+                post {
+                    always {
+                        script {
+                            echo "Ensuring all test containers are torn down..."
+                            // Forcefully stop and remove database containers to prevent port collisions on subsequent builds
+                            sh 'docker compose -f docker-compose.yml down -v || true'
+                        }
+                    }
                 }
             }
             
             stage ('Package') {
                 steps {
-                    sh 'mvn package -DskipTests'
+                    // Optimized with local Maven dependency caching
+                    sh 'mvn -Dmaven.repo.local=/var/jenkins/.m2/repository package -DskipTests'
                 }
             }
             
@@ -55,12 +67,15 @@ def call(Map config = [:]) {
                     withCredentials([
                         string(credentialsId: 'aws-ecr-uri', variable: 'SECRET_ECR_URI')
                     ]) {
-                        script {
-                            def versionedImage = "${SECRET_ECR_URI}/${imageName}:${imageTag}"
-                            echo "Building Docker Image: ${versionedImage}"
-                            
-                            // Always build to validate the Dockerfile compiles successfully
-                            sh "docker build -t ${versionedImage} ."
+                        // Use withEnv to pass our Groovy variables to the Linux shell safely
+                        withEnv(["IMAGE_NAME=${imageName}", "IMAGE_TAG=${imageTag}"]) {
+                            // Notice the use of single quotes ''' here. Groovy ignores the variables, preventing interpolation warnings.
+                            sh '''
+                                VERSIONED_IMAGE="$SECRET_ECR_URI/$IMAGE_NAME:$IMAGE_TAG"
+                                echo "Building Docker Image: $VERSIONED_IMAGE"
+                                
+                                docker build -t $VERSIONED_IMAGE .
+                            '''
                         }
                     }
                 }
@@ -75,21 +90,23 @@ def call(Map config = [:]) {
                         string(credentialsId: 'aws-ecr-uri', variable: 'SECRET_ECR_URI'),
                         string(credentialsId: 'aws-ecr-region', variable: 'SECRET_AWS_REGION')
                     ]) {
-                        script {
-                            def versionedImage = "${SECRET_ECR_URI}/${imageName}:${imageTag}"
-                            def latestImage = "${SECRET_ECR_URI}/${imageName}:latest"
-                            
-                            echo "Main branch detected. Pushing to AWS ECR..."
-                            
-                            // 1. Authenticate with AWS ECR
-                            sh "aws ecr get-login-password --region ${SECRET_AWS_REGION} | docker login --username AWS --password-stdin ${SECRET_ECR_URI}"
-                            
-                            // 2. Apply the 'latest' floating tag locally
-                            sh "docker tag ${versionedImage} ${latestImage}"
-                            
-                            // 3. Push both the immutable version tag and the latest tag
-                            sh "docker push ${versionedImage}"
-                            sh "docker push ${latestImage}"
+                        withEnv(["IMAGE_NAME=${imageName}", "IMAGE_TAG=${imageTag}"]) {
+                            sh '''
+                                VERSIONED_IMAGE="$SECRET_ECR_URI/$IMAGE_NAME:$IMAGE_TAG"
+                                LATEST_IMAGE="$SECRET_ECR_URI/$IMAGE_NAME:latest"
+                                
+                                echo "Main branch detected. Pushing to AWS ECR..."
+                                
+                                # 1. Authenticate with AWS ECR (Bash resolves the secrets securely)
+                                aws ecr get-login-password --region $SECRET_AWS_REGION | docker login --username AWS --password-stdin $SECRET_ECR_URI
+                                
+                                # 2. Apply the 'latest' floating tag locally
+                                docker tag $VERSIONED_IMAGE $LATEST_IMAGE
+                                
+                                # 3. Push both tags
+                                docker push $VERSIONED_IMAGE
+                                docker push $LATEST_IMAGE
+                            '''
                         }
                     }
                 }
