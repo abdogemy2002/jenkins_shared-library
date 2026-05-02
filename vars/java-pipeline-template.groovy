@@ -2,7 +2,7 @@
 def call(Map config = [:]) {
     
     // Define parameters with fallback default values
-    def gitUrl = config.gitUrl ?: 'https://github.com/spring-projects/spring-petclinic.git'
+    def gitUrl = config.gitUrl ?: 'https://github.com/spring-projects/spring-petclinic-a.git'
     def gitBranch = config.gitBranch ?: 'main'
     def serverPort = config.serverPort ?: '9090'
 
