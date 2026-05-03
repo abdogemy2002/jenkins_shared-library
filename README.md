@@ -57,13 +57,13 @@ The pipeline executes the following stages sequentially. If any stage fails, the
 6.  **Docker Build:** Packages the `.jar` into a lightweight `eclipse-temurin:17-jre-alpine` image. Runs as a non-root `spring` user for security.
 7.  **Docker Push to ECR:** (Executes on `main` branch only). Authenticates natively via the attached IAM Role and pushes both the versioned tag and the `latest` tag to AWS ECR.
 #### dev branch build 
-![[dev branch build.png]]
+![DEV branch build](/image.png)
 ## 6. Security Implementations
 *   **Least Privilege:** The Docker container drops root privileges and executes the application as a dedicated system user.
 *   **Secret Management:** AWS credentials are not stored in Jenkins. Authentication is handled dynamically via the EC2 metadata service and IAM roles.
 *   **Groovy Interpolation:** Shell commands interacting with AWS use single quotes (`'''`) to prevent plain-text secrets from being exposed in Jenkins logs.
 
-![DEV branch build](/image.png)
+
 
 ## 7. Troubleshooting & Known Issues
 
