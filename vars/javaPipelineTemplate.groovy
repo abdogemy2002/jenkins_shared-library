@@ -1,6 +1,5 @@
 def call(Map config = [:]) {
     
-    // --- Configuration Variables ---
     def gitUrl = config.gitUrl 
     def gitBranch = config.gitBranch ?: 'main'
     def serverPort = config.serverPort ?: '9090'
@@ -41,14 +40,12 @@ def call(Map config = [:]) {
             
             stage ('Test') {
                 steps {
-                    // Optimized with local Maven dependency caching
                     sh 'mvn -Dmaven.repo.local=/var/jenkins/.m2/repository test'
                 }
                 post {
                     always {
                         script {
                             echo "Ensuring all test containers are torn down..."
-                            // Forcefully stop and remove database containers to prevent port collisions on subsequent builds
                             sh 'docker compose -f docker-compose.yml down -v || true'
                         }
                     }
@@ -57,7 +54,6 @@ def call(Map config = [:]) {
             
             stage ('Package') {
                 steps {
-                    // Optimized with local Maven dependency caching
                     sh 'mvn -Dmaven.repo.local=/var/jenkins/.m2/repository package -DskipTests'
                 }
             }
@@ -67,9 +63,7 @@ def call(Map config = [:]) {
                     withCredentials([
                         string(credentialsId: 'aws-ecr-uri', variable: 'SECRET_ECR_URI')
                     ]) {
-                        // Use withEnv to pass our Groovy variables to the Linux shell safely
                         withEnv(["IMAGE_NAME=${imageName}", "IMAGE_TAG=${imageTag}"]) {
-                            // Notice the use of single quotes ''' here. Groovy ignores the variables, preventing interpolation warnings.
                             sh '''
                                 VERSIONED_IMAGE="$SECRET_ECR_URI/$IMAGE_NAME:$IMAGE_TAG"
                                 echo "Building Docker Image: $VERSIONED_IMAGE"

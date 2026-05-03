@@ -5,7 +5,7 @@ This project implements a fully automated, declarative Continuous Integration (C
 
 **Flow overview:**
 
-![[project overview.png]]
+![CI/CD Pipeline Architecture](/project%20overview%20.png)
 
 ## 2. Infrastructure & Prerequisites
 To run this pipeline, the following infrastructure components must be active:
@@ -62,6 +62,8 @@ The pipeline executes the following stages sequentially. If any stage fails, the
 *   **Least Privilege:** The Docker container drops root privileges and executes the application as a dedicated system user.
 *   **Secret Management:** AWS credentials are not stored in Jenkins. Authentication is handled dynamically via the EC2 metadata service and IAM roles.
 *   **Groovy Interpolation:** Shell commands interacting with AWS use single quotes (`'''`) to prevent plain-text secrets from being exposed in Jenkins logs.
+
+![DEV branch build](/image.png)
 
 ## 7. Troubleshooting & Known Issues
 
