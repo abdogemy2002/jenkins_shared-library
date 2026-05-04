@@ -2,13 +2,13 @@ def call(Map config = [:]) {
     
     def gitUrl = config.gitUrl 
     def gitBranch = config.gitBranch ?: 'main'
-    def serverPort = config.serverPort ?: '9090'
-    def imageName = config.imageName ?: 'spring-petclinic'
+    def serverPort = config.serverPort ?: '8081'
+    def imageName = config.imageName ?: 'spring-app-a'
     def imageTag = config.imageTag ?: 'latest'
 
     pipeline {
         agent {
-           label 'jenkins-worker' 
+            label 'jenkins-worker' 
         } 
         
         tools {
@@ -33,7 +33,6 @@ def call(Map config = [:]) {
             
             stage ('Clean & Compile') {
                 steps {
-                    // Optimized with local Maven dependency caching
                     sh 'mvn -Dmaven.repo.local=/var/jenkins/.m2/repository clean compile'
                 }
             }
@@ -91,15 +90,41 @@ def call(Map config = [:]) {
                                 
                                 echo "Main branch detected. Pushing to AWS ECR..."
                                 
-                                # 1. Authenticate with AWS ECR (Bash resolves the secrets securely)
                                 aws ecr get-login-password --region $SECRET_AWS_REGION | docker login --username AWS --password-stdin $SECRET_ECR_URI
                                 
-                                # 2. Apply the 'latest' floating tag locally
                                 docker tag $VERSIONED_IMAGE $LATEST_IMAGE
                                 
-                                # 3. Push both tags
                                 docker push $VERSIONED_IMAGE
                                 docker push $LATEST_IMAGE
+                            '''
+                        }
+                    }
+                }
+            }
+
+            stage ('Deploy to Local EC2') {
+                when {
+                    branch 'main'
+                }
+                steps {
+                    withCredentials([
+                        string(credentialsId: 'aws-ecr-uri', variable: 'SECRET_ECR_URI')
+                    ]) {
+                        withEnv(["IMAGE_NAME=${imageName}", "IMAGE_TAG=${imageTag}", "SERVER_PORT=${serverPort}"]) {
+                            sh '''
+                                VERSIONED_IMAGE="$SECRET_ECR_URI/$IMAGE_NAME:$IMAGE_TAG"
+                                echo "Deploying $VERSIONED_IMAGE locally on the Jenkins Worker..."
+                                
+                                docker stop $IMAGE_NAME || true
+                                docker rm $IMAGE_NAME || true
+                                
+                                docker run -d \
+                                    --name $IMAGE_NAME \
+                                    -p $SERVER_PORT:$SERVER_PORT \
+                                    --restart unless-stopped \
+                                    $VERSIONED_IMAGE
+                                    
+                                echo "Deployment successful! Container is running on port $SERVER_PORT."
                             '''
                         }
                     }
